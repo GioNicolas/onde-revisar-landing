@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Onde Revisar Primeiro — Giorgio Nicolas</title>
+<meta name="description" content="Estudo exploratório: sinais dos logs de execução de agentes de código para decidir por onde começar a revisar um diff. Por Giorgio Nicolas.">
+<style>
+  :root {
+    --bg: #fafaf7;
+    --surface: #ffffff;
+    --ink: #16181d;
+    --muted: #5b6270;
+    --line: #e3e3dd;
+    --accent: #0b6e4f;
+    --accent-ink: #ffffff;
+    --soft: #e6f4ec;
+    --grey: #9aa0ab;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --surface: #171a21; --ink: #e8eaee; --muted: #9aa2b1;
+      --line: #272b35; --accent: #4cc38a; --accent-ink: #08130e; --soft: #13261d; --grey: #5d6573;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.55 var(--sans); }
+  a { color: inherit; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 0 20px; }
+
+  header { padding: 20px 0; border-bottom: 1px solid var(--line); }
+  header .wrap { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+  .brand { font-family: var(--mono); font-size: 14px; text-decoration: none; }
+  .brand span { color: var(--accent); }
+  nav { display: flex; gap: 18px; font-size: 14px; }
+  nav a { color: var(--muted); text-decoration: none; }
+  nav a:hover { color: var(--ink); }
+
+  .hero { padding: 56px 0 40px; }
+  .eyebrow { font: 13px var(--mono); color: var(--accent); letter-spacing: .04em; margin: 0 0 14px; }
+  h1 { font-size: clamp(30px, 6vw, 52px); line-height: 1.08; letter-spacing: -.02em; margin: 0 0 18px; max-width: 18em; }
+  .lede { font-size: 19px; color: var(--muted); max-width: 37em; margin: 0 0 28px; }
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .btn { display: inline-block; padding: 13px 22px; border-radius: 8px; font-weight: 600; text-decoration: none; background: var(--accent); color: var(--accent-ink); }
+  .btn:hover { filter: brightness(1.08); }
+  .btn:focus-visible, a:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+  .meta { font: 13px var(--mono); color: var(--muted); }
+
+  /* the page's one distinctive device: a result read like a terminal table */
+  .card { margin-top: 40px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .card-head { padding: 12px 16px; border-bottom: 1px solid var(--line); font: 12px var(--mono); color: var(--muted); display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .card-title { padding: 16px 16px 6px; font-size: 16px; font-weight: 600; margin: 0; }
+  .card-sub { padding: 0 16px 8px; margin: 0; color: var(--muted); font-size: 14.5px; }
+  .row { display: grid; grid-template-columns: 250px 1fr 56px; gap: 14px; align-items: center; padding: 9px 16px; font: 14px var(--mono); }
+  .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .track { height: 12px; background: var(--line); border-radius: 3px; overflow: hidden; }
+  .track i { display: block; height: 100%; background: var(--grey); }
+  .row.best { background: var(--soft); }
+  .row.best .track i { background: var(--accent); }
+  .row .val { text-align: right; }
+  .card-note { padding: 12px 16px; font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); margin-top: 8px; }
+
+  section { padding: 44px 0; border-top: 1px solid var(--line); }
+  h2 { font-size: 14px; font-family: var(--mono); font-weight: 600; color: var(--accent); letter-spacing: .04em; text-transform: uppercase; margin: 0 0 22px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin: 0; padding: 0; list-style: none; }
+  .grid3 li { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 20px; }
+  .grid3 b { display: block; font: 13px var(--mono); color: var(--accent); margin-bottom: 8px; }
+  .grid3 h3 { margin: 0 0 6px; font-size: 18px; }
+  .grid3 p { margin: 0; color: var(--muted); font-size: 15.5px; }
+
+  .limits { margin: 0 0 0; padding: 0; list-style: none; display: grid; gap: 14px; max-width: 42em; }
+  .limits li { padding-left: 22px; position: relative; }
+  .limits li::before { content: "→"; position: absolute; left: 0; color: var(--accent); font-family: var(--mono); }
+  .limits strong { font-weight: 600; }
+  .limits-intro { color: var(--muted); max-width: 40em; margin: 0 0 20px; }
+
+  .close h2 { margin-bottom: 10px; }
+  .close p.big { font-size: clamp(22px, 4vw, 30px); line-height: 1.25; letter-spacing: -.01em; margin: 0 0 24px; max-width: 24em; }
+  .links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+  .links a { padding: 10px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); text-decoration: none; font-size: 15px; }
+  .links a:hover { border-color: var(--accent); }
+  footer { padding: 28px 0 48px; font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); }
+
+  @media (max-width: 680px) {
+    .grid3 { grid-template-columns: 1fr; }
+    .row { grid-template-columns: 1fr 48px; gap: 6px 10px; padding: 10px 16px; }
+    .row .name { grid-column: 1 / -1; white-space: normal; }
+    .row .track { grid-column: 1; }
+    .hero { padding-top: 36px; }
+    nav a:not(.keep) { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <a class="brand" href="https://www.giorgionicolas.com/">giorgio<span>.</span>nicolas</a>
+    <nav>
+      <a class="keep" href="https://github.com/GioNicolas/pesquisa-onde-revisar">Pesquisa</a>
+      <a href="https://github.com/GioNicolas">GitHub</a>
+      <a href="https://linkedin.com/in/giorgionicolas">LinkedIn</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    <div class="hero">
+      <p class="eyebrow">// estudo exploratório · revisão de código</p>
+      <h1>Agentes geram patches mais rápido do que alguém consegue revisar.</h1>
+      <p class="lede">O que o agente leu, testou e errou antes de editar já diz algo sobre quais trechos merecem atenção primeiro. Estou medindo quanto desse sinal ajuda a montar uma ordem de leitura do diff.</p>
+      <div class="cta">
+        <a class="btn" href="https://github.com/GioNicolas/pesquisa-onde-revisar">Ler a pesquisa →</a>
+        <span class="meta">código, dados e limites no GitHub</span>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><span>resultados preliminares · 1.536 hunks · 1.000 trajetórias</span><span>validação cruzada 5-fold</span></div>
+        <p class="card-title">Dos hunks sem alinhamento com o patch humano, quantos aparecem entre os 30% primeiros</p>
+        <p class="card-sub">Recall@30% por estratégia de ordenação: a fatia desses hunks que cai nos 30% do topo da fila. Sorteio dá cerca de 30%. Quanto maior, melhor.</p>
+        <div class="row"><span class="name">Sorteio</span><span class="track"><i style="width:49.5%"></i></span><span class="val">29,7%</span></div>
+        <div class="row"><span class="name">Ordem do diff</span><span class="track"><i style="width:51.8%"></i></span><span class="val">31,1%</span></div>
+        <div class="row"><span class="name">Maior hunk primeiro</span><span class="track"><i style="width:63.7%"></i></span><span class="val">38,2%</span></div>
+        <div class="row best"><span class="name">Trajetória (reg. logística)</span><span class="track"><i style="width:80.8%"></i></span><span class="val">48,5%</span></div>
+        <div class="row best"><span class="name">Trajetória (random forest)</span><span class="track"><i style="width:81%"></i></span><span class="val">48,6%</span></div>
+        <div class="card-note">O alvo é um proxy: hunk que não se alinha às regiões do patch humano de referência (tolerância de 15 linhas). Não são bugs confirmados. Veja os limites mais abaixo.</div>
+      </div>
+    </div>
+
+    <section>
+      <h2>O método em três passos</h2>
+      <ol class="grid3">
+        <li><b>01</b><h3>Extrair sinais</h3><p>Da trajetória do agente: leu o arquivo antes de editar, verificou depois, teve erro de ferramenta logo antes, tamanho do hunk.</p></li>
+        <li><b>02</b><h3>Ordenar os hunks</h3><p>Dois modelos simples, regressão logística e random forest, comparados com sorteio, ordem do diff e maior hunk primeiro.</p></li>
+        <li><b>03</b><h3>Avaliar com cuidado</h3><p>Validação cruzada agrupada por instância, curva de esforço de inspeção, AUCEC, ROC-AUC e Recall@K.</p></li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>O que isso ainda não prova</h2>
+      <p class="limits-intro">Deixo os limites à vista porque a pesquisa ainda está em andamento e não passou por revisão de pares.</p>
+      <ul class="limits">
+        <li><strong>Proxy, não bug.</strong> Diferença em relação ao patch humano não demonstra erro: uma solução correta pode mexer em outros trechos.</li>
+        <li><strong>Esforço medido em hunks.</strong> Não há ainda medida de tempo de revisores, nem prova de ganho dentro de cada patch.</li>
+        <li><strong>Sem generalização demonstrada.</strong> Os dados vêm de trajetórias públicas do SWE-agent. Transferência entre repositórios e agentes não foi testada.</li>
+        <li><strong>Próximo passo.</strong> Rotulagem manual de hunks errados, com evidências de teste, antes de atualizar modelos e números.</li>
+      </ul>
+    </section>
+
+    <section class="close">
+      <h2>Próximo passo</h2>
+      <p class="big">Leia a pesquisa. Se fizer sentido, me siga no GitHub ou fale comigo no LinkedIn.</p>
+      <div class="cta">
+        <a class="btn" href="https://github.com/GioNicolas/pesquisa-onde-revisar">Ler a pesquisa →</a>
+      </div>
+      <div class="links">
+        <a href="https://github.com/GioNicolas">GitHub</a>
+        <a href="https://linkedin.com/in/giorgionicolas">LinkedIn</a>
+        <a href="https://www.giorgionicolas.com/">giorgionicolas.com</a>
+      </div>
+    </section>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">Giorgio Nicolas · Ciência de Dados e IA, UFPB · João Pessoa, Brasil</div>
+</footer>
+
+</body>
+</html>
